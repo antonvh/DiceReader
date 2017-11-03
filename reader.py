@@ -22,11 +22,12 @@ def nothing(x):
 
 # Yellow
 min_H = 8
-min_S = 139
-min_V = 96
+min_S = 83
+min_V = 77
 max_H = 24
 max_S = 255
 max_V = 232
+thresh = 50
 
 
 cv2.namedWindow("cam", cv2.WINDOW_OPENGL+cv2.WINDOW_AUTOSIZE)
@@ -36,6 +37,7 @@ cv2.createTrackbar('min_V', 'cam', 0, 255, nothing)
 cv2.createTrackbar('max_H', 'cam', 0, 255, nothing)
 cv2.createTrackbar('max_S', 'cam', 0, 255, nothing)
 cv2.createTrackbar('max_V', 'cam', 0, 255, nothing)
+cv2.createTrackbar('thresh', 'cam', 0, 255, nothing)
 
 cv2.setTrackbarPos('min_H', 'cam', min_H)
 cv2.setTrackbarPos('min_S', 'cam', min_S)
@@ -43,13 +45,14 @@ cv2.setTrackbarPos('min_V', 'cam', min_V)
 cv2.setTrackbarPos('max_H', 'cam', max_H)
 cv2.setTrackbarPos('max_S', 'cam', max_S)
 cv2.setTrackbarPos('max_V', 'cam', max_V)
+cv2.setTrackbarPos('thresh', 'cam', thresh)
 
 
 cap = cv2.VideoCapture(0)
 cap.set(3,1920)
 SERVER_ADDR = ("255.255.255.255", 50008)
 RECV_BUFFER = 128  # Block size
-MIN_CONTOUR_AREA = 100
+MIN_CONTOUR_AREA = 300
 MAX_CONTOUR_AREA = 10000
 ROI_IMAGE_SIZE = 30
 
@@ -123,7 +126,6 @@ def crop_minAreaRect(img, rect, extra_crop = 0):
     center = rect[0]
     angle = rect[2]
     scale = 1.0
-    print(center, angle, scale)
 
     # Perform the rotation
     M = cv2.getRotationMatrix2D(center, angle, scale)
@@ -141,7 +143,6 @@ def crop_minAreaRect(img, rect, extra_crop = 0):
     right = min(w, pts[0][1]-extra_crop)
     if right <= left : right = left+5
     if bottom <= top : bottom = top+5
-    print(top,left,bottom,right)
     img_crop = img_rot[left:right,
                        top:bottom]
 
@@ -199,9 +200,8 @@ while True:
     upper_yellow = (max_H, max_S, max_V)
 
     mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
-
-    # res = cv2.bitwise_and(frame, frame, mask=mask)
-
+    mask = cv2.bitwise_not(mask)
+    cv2.imshow("mask", mask)
 
     # convert to grayscale
     img_grey = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -209,17 +209,16 @@ while True:
     # logging.debug("read greyscale", t - time.time())
     # Otsu's thresholding. Nice & fast!
     # http://docs.opencv.org/trunk/d7/d4d/tutorial_py_thresholding.html
-    # values, img_grey = cv2.threshold(img_grey, 200, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # values, img_grey = cv2.threshold(img_grey, thresh, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     # Simple adaptive mean thresholding
-    values, img_grey = cv2.threshold(img_grey, 50, 255, cv2.ADAPTIVE_THRESH_MEAN_C)
+    values, img_grey = cv2.threshold(img_grey, thresh, 255, cv2.ADAPTIVE_THRESH_MEAN_C)
 
     # Find contours and tree
-    img_grey, contours, hierarchy = cv2.findContours(img_grey, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    # logging.debug("found contours", t - time.time())
+    _, contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     # Preview thresholded image
-    cv2.cvtColor(img_grey, cv2.COLOR_GRAY2BGR)
+    img = cv2.cvtColor(img_grey, cv2.COLOR_GRAY2BGR)
 
     for x in range(0, len(contours)):
         contour = contours[x]
@@ -247,7 +246,7 @@ while True:
 
             # Cut the minimum rectangle from the image
             die = crop_minAreaRect(img_grey, rotated_rect, extra_crop = 5)
-            cv2.imshow("crop", mask)
+            cv2.imshow("crop", die)
 
             imgROIResized = cv2.resize(die, (ROI_IMAGE_SIZE,
                                                 ROI_IMAGE_SIZE))  # resize image, this will be more consistent for recognition and storage
@@ -257,7 +256,7 @@ while True:
 
             retval, npaResults, neigh_resp, dists = kNearest.findNearest(npaROIResized,
                                                                          k=1)  # call KNN function find_nearest
-            code = str(chr(int(npaResults[0][0])))
+            code = str(int(npaResults[0][0]))
 
             cv2.putText(img,
                             u"code: {0}".format(code),
@@ -272,10 +271,11 @@ while True:
     # Show all calculations in the preview window
     cv2.imshow("cam", img)
 
-    intValidChars = [ord('0'), ord('1'), ord('2'), ord('3'), ord('4'), ord('5'), ord('6'), ord('7'), ord('8'), ord('9')]
+    intValidChars = [ord('1'), ord('2'), ord('3'), ord('4'), ord('5'), ord('6'), ord('7'), ord('8'), ord('9'), ord('0'),
+                     ord('q'), ord('w'), ord('e'), ord('r'), ord('t'), ord('y'), ord('u'), ord('i'), ord('o'), ord('p')]
 
     # Wait for the 'q' key. Dont use ctrl-c !!!
-    keypress = cv2.waitKey(3000) & 0xFF
+    keypress = cv2.waitKey(1000) & 0xFF
 
     min_H = cv2.getTrackbarPos('min_H', 'cam')
     min_S = cv2.getTrackbarPos('min_S', 'cam')
@@ -283,15 +283,16 @@ while True:
     max_H = cv2.getTrackbarPos('max_H', 'cam')
     max_S = cv2.getTrackbarPos('max_S', 'cam')
     max_V = cv2.getTrackbarPos('max_V', 'cam')
+    thresh = cv2.getTrackbarPos('thresh', 'cam')
 
-
-    if keypress == ord('q'):
+    if keypress == ord('x'):
         np.savetxt("classifications.txt", npaClassifications)
         np.savetxt("flattened_images.txt", npaFlattenedImages)
         break
     elif keypress in intValidChars:  # else if the char is in the list of chars we are looking for . . .
         # Add classifier
-        new_classifier = np.array([[keypress]]).astype(np.float32)
+
+        new_classifier = np.array([[intValidChars.index(keypress)+1]]).astype(np.float32)
         npaClassifications = np.append(npaClassifications, new_classifier, axis=0)  # append classification char to integer list of chars (we will convert to float later before writing to file)
         npaFlattenedImages = np.append(npaFlattenedImages, npaROIResized.astype(np.float32), 0)
         # Retrain
