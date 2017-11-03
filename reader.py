@@ -17,34 +17,62 @@ except:
 from multiprocessing.connection import Listener
 
 ### Initialize ###
+def nothing(x):
+    pass
+
+# Yellow
+min_H = 8
+min_S = 139
+min_V = 96
+max_H = 24
+max_S = 255
+max_V = 232
+
 
 cv2.namedWindow("cam", cv2.WINDOW_OPENGL+cv2.WINDOW_AUTOSIZE)
+cv2.createTrackbar('min_H', 'cam', 0, 255, nothing)
+cv2.createTrackbar('min_S', 'cam', 0, 255, nothing)
+cv2.createTrackbar('min_V', 'cam', 0, 255, nothing)
+cv2.createTrackbar('max_H', 'cam', 0, 255, nothing)
+cv2.createTrackbar('max_S', 'cam', 0, 255, nothing)
+cv2.createTrackbar('max_V', 'cam', 0, 255, nothing)
+
+cv2.setTrackbarPos('min_H', 'cam', min_H)
+cv2.setTrackbarPos('min_S', 'cam', min_S)
+cv2.setTrackbarPos('min_V', 'cam', min_V)
+cv2.setTrackbarPos('max_H', 'cam', max_H)
+cv2.setTrackbarPos('max_S', 'cam', max_S)
+cv2.setTrackbarPos('max_V', 'cam', max_V)
+
+
 cap = cv2.VideoCapture(0)
 cap.set(3,1920)
-robot_positions = {}
 SERVER_ADDR = ("255.255.255.255", 50008)
 RECV_BUFFER = 128  # Block size
 MIN_CONTOUR_AREA = 100
 MAX_CONTOUR_AREA = 10000
 ROI_IMAGE_SIZE = 30
+
 logging.basicConfig(#filename='position_server.log',     # To a file. Or not.
                     filemode='w',                       # Start each run with a fresh log
                     format='%(asctime)s, %(levelname)s, %(message)s',
                     datefmt='%H:%M:%S',
                     level=logging.INFO, )              # Log info, and warning
 running = True
-n = 100             # Number of loops to wait for time calculation
-t = time.time()
 
+
+### Load recognition data ###
 try:
     npaClassifications = np.loadtxt("classifications.txt", np.float32)  # read in training classifications
 except:
-    print("error, unable to open classifications.txt, exiting program\n")
+    print("error, unable to open classifications.txt, creating empty array")
+    npaClassifications = np.array([0], np.float32)
 
 try:
     npaFlattenedImages = np.loadtxt("flattened_images.txt", np.float32)  # read in training images
 except:
-    print("error, unable to open flattened_images.txt, exiting program\n")
+    print("error, unable to open flattened_images.txt, creating empty array")
+    npaFlattenedImages = np.ones((1, ROI_IMAGE_SIZE**2), np.float32)
 
 npaClassifications = npaClassifications.reshape(
     (npaClassifications.size, 1))  # reshape numpy array to 1d, necessary to pass to call to train
@@ -102,14 +130,20 @@ def crop_minAreaRect(img, rect, extra_crop = 0):
     img_rot = cv2.warpAffine(img, M, (w, h))
 
     # rotate bounding box
-    print(rect)
     box = cv2.boxPoints(rect)
     pts = cv2.transform(np.array([box]), M)[0].astype(int)
     pts[pts < 0] = 0
 
     # crop
-    img_crop = img_rot[pts[1][1]+extra_crop:pts[0][1]-extra_crop,
-                       pts[1][0]+extra_crop:pts[2][0]-extra_crop]
+    top = max(0, pts[1][0]+extra_crop)
+    left = max(0, pts[1][1]+extra_crop)
+    bottom = min(h, pts[2][0]-extra_crop)
+    right = min(w, pts[0][1]-extra_crop)
+    if right <= left : right = left+5
+    if bottom <= top : bottom = top+5
+    print(top,left,bottom,right)
+    img_crop = img_rot[left:right,
+                       top:bottom]
 
     return np.array(img_crop)
 
@@ -133,7 +167,6 @@ class SocketThread(Thread):
 
             try:
                 sent = self.server_socket.sendto(data, SERVER_ADDR)
-                # print(sent)
                 time.sleep(0.025)
             except OSError as exc:
                 if exc.errno == 55:
@@ -159,7 +192,16 @@ while True:
     img = crop(img, 400, 500)
     height, width = img.shape[:2]
 
-    # print(img_crop.shape)
+    # Filter yellow
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    lower_yellow = (min_H,min_S, min_V)
+    upper_yellow = (max_H, max_S, max_V)
+
+    mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+    # res = cv2.bitwise_and(frame, frame, mask=mask)
+
 
     # convert to grayscale
     img_grey = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -205,7 +247,7 @@ while True:
 
             # Cut the minimum rectangle from the image
             die = crop_minAreaRect(img_grey, rotated_rect, extra_crop = 5)
-            cv2.imshow("crop", die)
+            cv2.imshow("crop", mask)
 
             imgROIResized = cv2.resize(die, (ROI_IMAGE_SIZE,
                                                 ROI_IMAGE_SIZE))  # resize image, this will be more consistent for recognition and storage
@@ -215,7 +257,6 @@ while True:
 
             retval, npaResults, neigh_resp, dists = kNearest.findNearest(npaROIResized,
                                                                          k=1)  # call KNN function find_nearest
-            print(npaResults, neigh_resp, dists)
             code = str(chr(int(npaResults[0][0])))
 
             cv2.putText(img,
@@ -235,6 +276,15 @@ while True:
 
     # Wait for the 'q' key. Dont use ctrl-c !!!
     keypress = cv2.waitKey(3000) & 0xFF
+
+    min_H = cv2.getTrackbarPos('min_H', 'cam')
+    min_S = cv2.getTrackbarPos('min_S', 'cam')
+    min_V = cv2.getTrackbarPos('min_V', 'cam')
+    max_H = cv2.getTrackbarPos('max_H', 'cam')
+    max_S = cv2.getTrackbarPos('max_S', 'cam')
+    max_V = cv2.getTrackbarPos('max_V', 'cam')
+
+
     if keypress == ord('q'):
         np.savetxt("classifications.txt", npaClassifications)
         np.savetxt("flattened_images.txt", npaFlattenedImages)
