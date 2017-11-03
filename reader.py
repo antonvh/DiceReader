@@ -8,19 +8,11 @@ import select, socket, sys, struct
 import logging
 from firebase import firebase
 
-try:
-    import cPickle as pickle
-except:
-    import pickle
-
-
-from multiprocessing.connection import Listener
-
 ### Initialize ###
-def nothing(x):
+def nothing(x): # An empty handler for openCV sliders
     pass
 
-# Yellow
+# Yellow filter
 min_H = 15
 min_S = 140
 min_V = 115
@@ -29,7 +21,13 @@ max_S = 255
 max_V = 255
 thresh = 50
 
+# Other Image Recog settings
+MIN_CONTOUR_AREA = 300
+MAX_CONTOUR_AREA = 10000
+ROI_IMAGE_SIZE = 40
 
+
+# Create window & trackbars
 cv2.namedWindow("cam", cv2.WINDOW_OPENGL+cv2.WINDOW_AUTOSIZE)
 cv2.createTrackbar('min_H', 'cam', 0, 255, nothing)
 cv2.createTrackbar('min_S', 'cam', 0, 255, nothing)
@@ -38,7 +36,6 @@ cv2.createTrackbar('max_H', 'cam', 0, 255, nothing)
 cv2.createTrackbar('max_S', 'cam', 0, 255, nothing)
 cv2.createTrackbar('max_V', 'cam', 0, 255, nothing)
 cv2.createTrackbar('thresh', 'cam', 0, 255, nothing)
-
 cv2.setTrackbarPos('min_H', 'cam', min_H)
 cv2.setTrackbarPos('min_S', 'cam', min_S)
 cv2.setTrackbarPos('min_V', 'cam', min_V)
@@ -47,22 +44,12 @@ cv2.setTrackbarPos('max_S', 'cam', max_S)
 cv2.setTrackbarPos('max_V', 'cam', max_V)
 cv2.setTrackbarPos('thresh', 'cam', thresh)
 
-
+# Start webcam
 cap = cv2.VideoCapture(0)
 cap.set(3, 1920)
 cap.set(4, 1080)
-SERVER_ADDR = ("255.255.255.255", 50008)
-RECV_BUFFER = 128  # Block size
-MIN_CONTOUR_AREA = 300
-MAX_CONTOUR_AREA = 10000
-ROI_IMAGE_SIZE = 40
 
-logging.basicConfig(#filename='position_server.log',     # To a file. Or not.
-                    filemode='w',                       # Start each run with a fresh log
-                    format='%(asctime)s, %(levelname)s, %(message)s',
-                    datefmt='%H:%M:%S',
-                    level=logging.INFO, )              # Log info, and warning
-running = True
+# IO
 firebase = firebase.FirebaseApplication('https://dungeonsanddragons-6a9b1.firebaseio.com/', authentication=None)
 
 ### Load recognition data ###
@@ -86,20 +73,6 @@ kNearest = cv2.ml.KNearest_create()  # instantiate KNN object
 kNearest.train(npaFlattenedImages, cv2.ml.ROW_SAMPLE, npaClassifications)
 
 ### Helper functions ###
-def atan2_vec(vector):
-    return -np.arctan2(vector[1], vector[0])
-
-
-def vec_length(vector):
-    return np.dot(vector, vector)**0.5
-
-
-def pixel(img_grey, vector):
-    if img_grey[vector[1], vector[0]]:
-        return 1
-    else:
-        return 0
-
 def rotate(image, angle, center=None, scale=1.0):
     (h, w) = image.shape[:2]
 
@@ -150,43 +123,8 @@ def crop_minAreaRect(img, rect, extra_crop = 0):
     return np.array(img_crop)
 
 
-### Thread(s) ###
-
-class SocketThread(Thread):
-    def __init__(self):
-        # Initialize server socket
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        logging.info("Position server started on UDP {0}".format(SERVER_ADDR))
-        Thread.__init__(self)
-
-    def run(self):
-        global robot_positions, running
-
-        while running:
-            data = pickle.dumps(robot_positions)
-
-            try:
-                sent = self.server_socket.sendto(data, SERVER_ADDR)
-                time.sleep(0.025)
-            except OSError as exc:
-                if exc.errno == 55:
-                    time.sleep(0.1)
-                else:
-                    raise
-        self.server_socket.close()
-        logging.info("Socket server stopped")
-
-
-
-### Start it all up ###
-# socket_server = SocketThread()
-# socket_server.start()
-
+### Main recognition loop ###
 while True:
-
-
     ok, img = cap.read()
     if not ok:
         continue    # and try again.
@@ -248,37 +186,35 @@ while True:
             die = crop_minAreaRect(img_grey, rotated_rect, extra_crop = 20)
             cv2.imshow("crop", die)
 
-            imgROIResized = cv2.resize(die, (ROI_IMAGE_SIZE,
-                                                ROI_IMAGE_SIZE))  # resize image, this will be more consistent for recognition and storage
-
+            # Resize the result to the size for recognition and find nearest.
+            imgROIResized = cv2.resize(die, (ROI_IMAGE_SIZE, ROI_IMAGE_SIZE))
             npaROIResized = imgROIResized.reshape((1, ROI_IMAGE_SIZE ** 2))
             npaROIResized = np.float32(npaROIResized)  # convert from 1d numpy array of ints to 1d numpy array of floats
-
-            retval, npaResults, neigh_resp, dists = kNearest.findNearest(npaROIResized,
-                                                                         k=1)  # call KNN function find_nearest
+            retval, npaResults, neigh_resp, dists = kNearest.findNearest(npaROIResized, k=1)
             code = str(int(npaResults[0][0]))
+
+            # Write the result in firebase
             result = firebase.get('/dice', None)
             firebase.delete('/dice', list(result.keys())[0])
             firebase.post('/dice', code)
+
+            # Draw the result on screen
             cv2.putText(img,
                             u"code: {0}".format(code),
                             (int(rotated_rect[0][0]),int(rotated_rect[0][1])),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
-
-
-
-
-
     # Show all calculations in the preview window
     cv2.imshow("cam", img)
 
+    # Keys for training. The second row is 11, 12, 13 etc...
     intValidChars = [ord('1'), ord('2'), ord('3'), ord('4'), ord('5'), ord('6'), ord('7'), ord('8'), ord('9'), ord('0'),
                      ord('q'), ord('w'), ord('e'), ord('r'), ord('t'), ord('y'), ord('u'), ord('i'), ord('o'), ord('p')]
 
     # Wait for the 'q' key. Dont use ctrl-c !!!
     keypress = cv2.waitKey(1000) & 0xFF
 
+    # Read trackbar values
     min_H = cv2.getTrackbarPos('min_H', 'cam')
     min_S = cv2.getTrackbarPos('min_S', 'cam')
     min_V = cv2.getTrackbarPos('min_V', 'cam')
@@ -292,21 +228,18 @@ while True:
         np.savetxt("flattened_images.txt", npaFlattenedImages)
         break
     elif keypress in intValidChars:  # else if the char is in the list of chars we are looking for . . .
-        # Add classifier
-
+        # Add classifier in 4 rotations
         for i in range(4):
             new_classifier = np.array([[intValidChars.index(keypress)+1]]).astype(np.float32)
             npaClassifications = np.append(npaClassifications, new_classifier, axis=0)  # append classification char to integer list of chars (we will convert to float later before writing to file)
             cv2.rotate(npaROIResized, cv2.ROTATE_90_CLOCKWISE)
             npaFlattenedImages = np.append(npaFlattenedImages, npaROIResized.astype(np.float32), 0)
-        # Retrain
+        # Retrain the network
         kNearest = cv2.ml.KNearest_create()
         kNearest.train(npaFlattenedImages, cv2.ml.ROW_SAMPLE, npaClassifications)
 
 
 
-        ### clean up ###
-running = False
+### clean up ###
 cap.release()
 cv2.destroyAllWindows()
-logging.info("Cleaned up")
