@@ -49,12 +49,13 @@ cv2.setTrackbarPos('thresh', 'cam', thresh)
 
 
 cap = cv2.VideoCapture(0)
-cap.set(3,1920)
+cap.set(3, 1920)
+cap.set(4, 1080)
 SERVER_ADDR = ("255.255.255.255", 50008)
 RECV_BUFFER = 128  # Block size
 MIN_CONTOUR_AREA = 300
 MAX_CONTOUR_AREA = 10000
-ROI_IMAGE_SIZE = 30
+ROI_IMAGE_SIZE = 40
 
 logging.basicConfig(#filename='position_server.log',     # To a file. Or not.
                     filemode='w',                       # Start each run with a fresh log
@@ -201,7 +202,6 @@ while True:
 
     mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
     mask = cv2.bitwise_not(mask)
-    cv2.imshow("mask", mask)
 
     # convert to grayscale
     img_grey = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -212,13 +212,13 @@ while True:
     # values, img_grey = cv2.threshold(img_grey, thresh, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     # Simple adaptive mean thresholding
-    values, img_grey = cv2.threshold(img_grey, thresh, 255, cv2.ADAPTIVE_THRESH_MEAN_C)
+    # values, img_grey = cv2.threshold(img_grey, thresh, 255, cv2.ADAPTIVE_THRESH_MEAN_C)
 
     # Find contours and tree
     _, contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     # Preview thresholded image
-    img = cv2.cvtColor(img_grey, cv2.COLOR_GRAY2BGR)
+    # img = cv2.cvtColor(img_grey, cv2.COLOR_GRAY2BGR)
 
     for x in range(0, len(contours)):
         contour = contours[x]
@@ -292,9 +292,11 @@ while True:
     elif keypress in intValidChars:  # else if the char is in the list of chars we are looking for . . .
         # Add classifier
 
-        new_classifier = np.array([[intValidChars.index(keypress)+1]]).astype(np.float32)
-        npaClassifications = np.append(npaClassifications, new_classifier, axis=0)  # append classification char to integer list of chars (we will convert to float later before writing to file)
-        npaFlattenedImages = np.append(npaFlattenedImages, npaROIResized.astype(np.float32), 0)
+        for i in range(4):
+            new_classifier = np.array([[intValidChars.index(keypress)+1]]).astype(np.float32)
+            npaClassifications = np.append(npaClassifications, new_classifier, axis=0)  # append classification char to integer list of chars (we will convert to float later before writing to file)
+            cv2.rotate(npaROIResized, cv2.ROTATE_90_CLOCKWISE)
+            npaFlattenedImages = np.append(npaFlattenedImages, npaROIResized.astype(np.float32), 0)
         # Retrain
         kNearest = cv2.ml.KNearest_create()
         kNearest.train(npaFlattenedImages, cv2.ml.ROW_SAMPLE, npaClassifications)
