@@ -25,6 +25,7 @@ robot_positions = {}
 SERVER_ADDR = ("255.255.255.255", 50008)
 RECV_BUFFER = 128  # Block size
 MIN_CONTOUR_AREA = 100
+MAX_CONTOUR_AREA = 10000
 ROI_IMAGE_SIZE = 30
 logging.basicConfig(#filename='position_server.log',     # To a file. Or not.
                     filemode='w',                       # Start each run with a fresh log
@@ -94,14 +95,14 @@ def crop_minAreaRect(img, rect, extra_crop = 0):
     center = rect[0]
     angle = rect[2]
     scale = 1.0
-    print(center,angle,scale)
+    print(center, angle, scale)
 
     # Perform the rotation
     M = cv2.getRotationMatrix2D(center, angle, scale)
     img_rot = cv2.warpAffine(img, M, (w, h))
 
     # rotate bounding box
-    rect0 = (rect[0], rect[1], 0.0)
+    print(rect)
     box = cv2.boxPoints(rect)
     pts = cv2.transform(np.array([box]), M)[0].astype(int)
     pts[pts < 0] = 0
@@ -180,6 +181,7 @@ while True:
 
     for x in range(0, len(contours)):
         contour = contours[x]
+        area = cv2.contourArea(contour)
         k = x
         c = 0
 
@@ -194,7 +196,7 @@ while True:
         if hierarchy[0][k][3] != -1:
             c = c + 1
 
-        if c == 1 and cv2.contourArea(contour) > MIN_CONTOUR_AREA:
+        if c == 1 and  MIN_CONTOUR_AREA < area < MAX_CONTOUR_AREA:
             # Fit a rectangle around the found contour and draw it.
             rotated_rect = cv2.minAreaRect(contour) #(center, size, angle)
             rotation = rotated_rect[2]
@@ -234,6 +236,8 @@ while True:
     # Wait for the 'q' key. Dont use ctrl-c !!!
     keypress = cv2.waitKey(3000) & 0xFF
     if keypress == ord('q'):
+        np.savetxt("classifications.txt", npaClassifications)
+        np.savetxt("flattened_images.txt", npaFlattenedImages)
         break
     elif keypress in intValidChars:  # else if the char is in the list of chars we are looking for . . .
         print(npaClassifications.shape,npaFlattenedImages.shape)
