@@ -6,8 +6,8 @@ import time, os
 from threading import Thread
 import select, socket, sys, struct
 import logging
+from firebase import firebase
 
-THRESH = 110
 try:
     import cPickle as pickle
 except:
@@ -63,7 +63,7 @@ logging.basicConfig(#filename='position_server.log',     # To a file. Or not.
                     datefmt='%H:%M:%S',
                     level=logging.INFO, )              # Log info, and warning
 running = True
-
+firebase = firebase.FirebaseApplication('https://dungeonsanddragons-6a9b1.firebaseio.com/', authentication=None)
 
 ### Load recognition data ###
 try:
@@ -257,7 +257,9 @@ while True:
             retval, npaResults, neigh_resp, dists = kNearest.findNearest(npaROIResized,
                                                                          k=1)  # call KNN function find_nearest
             code = str(int(npaResults[0][0]))
-
+            result = firebase.get('/dice', None)
+            firebase.delete('/dice', list(result.keys())[0])
+            firebase.post('/dice', code)
             cv2.putText(img,
                             u"code: {0}".format(code),
                             (int(rotated_rect[0][0]),int(rotated_rect[0][1])),
