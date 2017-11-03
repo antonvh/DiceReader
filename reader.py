@@ -67,6 +67,51 @@ def pixel(img_grey, vector):
     else:
         return 0
 
+def rotate(image, angle, center=None, scale=1.0):
+    (h, w) = image.shape[:2]
+
+    if center is None:
+        center = (w / 2, h / 2)
+
+    # Perform the rotation
+    M = cv2.getRotationMatrix2D(center, angle, scale)
+    rotated = cv2.warpAffine(image, M, (w, h))
+
+    return rotated
+
+def crop(img, target_w, target_h):
+    w, h = img.shape[:2]
+    y1 = max(0, w // 2 - target_w // 2)
+    y2 = min(w, w // 2 + target_w // 2)
+    x1 = max(0, h // 2 - target_h // 2)
+    x2 = min(h, h // 2 + target_h // 2)
+    return np.array(img[y1:y2, x1:x2])
+
+def crop_minAreaRect(img, rect, extra_crop = 0):
+
+    # rotate img
+    (h, w) = img.shape[:2]
+    center = rect[0]
+    angle = rect[2]
+    scale = 1.0
+    print(center,angle,scale)
+
+    # Perform the rotation
+    M = cv2.getRotationMatrix2D(center, angle, scale)
+    img_rot = cv2.warpAffine(img, M, (w, h))
+
+    # rotate bounding box
+    rect0 = (rect[0], rect[1], 0.0)
+    box = cv2.boxPoints(rect)
+    pts = cv2.transform(np.array([box]), M)[0].astype(int)
+    pts[pts < 0] = 0
+
+    # crop
+    img_crop = img_rot[pts[1][1]+extra_crop:pts[0][1]-extra_crop,
+                       pts[1][0]+extra_crop:pts[2][0]-extra_crop]
+
+    return np.array(img_crop)
+
 
 ### Thread(s) ###
 
@@ -97,13 +142,7 @@ class SocketThread(Thread):
         self.server_socket.close()
         logging.info("Socket server stopped")
 
-def crop(img, target_w, target_h):
-    w, h = img.shape[:2]
-    y1 = max(0, w // 2 - target_w // 2)
-    y2 = min(w, w // 2 + target_w // 2)
-    x1 = max(0, h // 2 - target_h // 2)
-    x2 = min(h, h // 2 + target_h // 2)
-    return np.array(img[y1:y2, x1:x2])
+
 
 ### Start it all up ###
 # socket_server = SocketThread()
@@ -157,22 +196,16 @@ while True:
 
         if c == 1 and cv2.contourArea(contour) > MIN_CONTOUR_AREA:
             # Fit a rectangle around the found contour and draw it.
-            rotated_rect = cv2.minAreaRect(contour)
+            rotated_rect = cv2.minAreaRect(contour) #(center, size, angle)
             rotation = rotated_rect[2]
             box = cv2.boxPoints(rotated_rect).astype(int)
             cv2.drawContours(img, [box], -1, (0, 255, 0))
 
+            # Cut the minimum rectangle from the image
+            die = crop_minAreaRect(img_grey, rotated_rect, extra_crop = 5)
+            cv2.imshow("crop", die)
 
-            dx, dy, dw, dh = cv2.boundingRect(contours[x])
-            center = np.array([dx + dw // 2, dy + dh // 2])
-            half_size = max(dw, dh) // 2 - 10
-            half_diagonal = np.array([half_size, half_size])
-            top_left = tuple(center - half_diagonal)
-            bottom_right = tuple(center + half_diagonal)
-            cv2.rectangle(img, top_left, bottom_right, (0,0,255))
-            # Try to read the number
-            imgROI = np.array(img_grey[top_left[1]: bottom_right[1], top_left[0]: bottom_right[0]])
-            imgROIResized = cv2.resize(imgROI, (ROI_IMAGE_SIZE,
+            imgROIResized = cv2.resize(die, (ROI_IMAGE_SIZE,
                                                 ROI_IMAGE_SIZE))  # resize image, this will be more consistent for recognition and storage
 
             npaROIResized = imgROIResized.reshape((1, ROI_IMAGE_SIZE ** 2))
@@ -184,32 +217,38 @@ while True:
             code = str(chr(int(npaResults[0][0])))
 
             cv2.putText(img,
-                            u"code: {0}, x:{1}, y:{2}".format(code, center[0], center[1]),
-                            tuple(center),
+                            u"code: {0}".format(code),
+                            (int(rotated_rect[0][0]),int(rotated_rect[0][1])),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
-            # If certainty is too low, ask for confirmation and adjust learning
+
+
 
 
 
     # Show all calculations in the preview window
     cv2.imshow("cam", img)
 
-    # logging.debug("shown image", t - time.time())
+    intValidChars = [ord('0'), ord('1'), ord('2'), ord('3'), ord('4'), ord('5'), ord('6'), ord('7'), ord('8'), ord('9')]
 
     # Wait for the 'q' key. Dont use ctrl-c !!!
-    keypress = cv2.waitKey(2000) & 0xFF
+    keypress = cv2.waitKey(3000) & 0xFF
     if keypress == ord('q'):
         break
-    if n == 0:
-        logging.info("Looptime: {0}, contours: {1}".format((time.time()-t)/100, len(contours)))
-        n = 100
-        t = time.time()
-    else:
-        n -= 1
+    elif keypress in intValidChars:  # else if the char is in the list of chars we are looking for . . .
+        print(npaClassifications.shape,npaFlattenedImages.shape)
+        # Add classifier
+        new_classifier = np.array([[keypress]]).astype(np.float32)
+        npaClassifications = np.append(npaClassifications, new_classifier, axis=0)  # append classification char to integer list of chars (we will convert to float later before writing to file)
+        npaFlattenedImages = np.append(npaFlattenedImages, npaROIResized.astype(np.float32), 0)
+        print(npaClassifications.shape, npaFlattenedImages.shape)
+        # Retrain
+        kNearest = cv2.ml.KNearest_create()
+        kNearest.train(npaFlattenedImages, cv2.ml.ROW_SAMPLE, npaClassifications)
 
 
-### clean up ###
+
+        ### clean up ###
 running = False
 cap.release()
 cv2.destroyAllWindows()
