@@ -21,12 +21,12 @@ def nothing(x):
     pass
 
 # Yellow
-min_H = 8
-min_S = 83
-min_V = 77
+min_H = 15
+min_S = 140
+min_V = 115
 max_H = 24
 max_S = 255
-max_V = 232
+max_V = 255
 thresh = 50
 
 
@@ -142,8 +142,8 @@ def crop_minAreaRect(img, rect, extra_crop = 0):
     left = max(0, pts[1][1]+extra_crop)
     bottom = min(h, pts[2][0]-extra_crop)
     right = min(w, pts[0][1]-extra_crop)
-    if right <= left : right = left+5
-    if bottom <= top : bottom = top+5
+    if right <= left : right = left+extra_crop
+    if bottom <= top : bottom = top+extra_crop
     img_crop = img_rot[left:right,
                        top:bottom]
 
@@ -191,7 +191,7 @@ while True:
     if not ok:
         continue    # and try again.
 
-    img = crop(img, 400, 500)
+    # img = crop(img, 400, 500)
     height, width = img.shape[:2]
 
     # Filter yellow
@@ -215,7 +215,7 @@ while True:
     # values, img_grey = cv2.threshold(img_grey, thresh, 255, cv2.ADAPTIVE_THRESH_MEAN_C)
 
     # Find contours and tree
-    _, contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    img_grey, contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     # Preview thresholded image
     # img = cv2.cvtColor(img_grey, cv2.COLOR_GRAY2BGR)
@@ -245,7 +245,7 @@ while True:
             cv2.drawContours(img, [box], -1, (0, 255, 0))
 
             # Cut the minimum rectangle from the image
-            die = crop_minAreaRect(img_grey, rotated_rect, extra_crop = 5)
+            die = crop_minAreaRect(img_grey, rotated_rect, extra_crop = 20)
             cv2.imshow("crop", die)
 
             imgROIResized = cv2.resize(die, (ROI_IMAGE_SIZE,
