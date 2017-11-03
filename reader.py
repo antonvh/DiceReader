@@ -156,7 +156,7 @@ while True:
     if not ok:
         continue    # and try again.
 
-    img = crop(img, 300, 400)
+    img = crop(img, 400, 500)
     height, width = img.shape[:2]
 
     # print(img_crop.shape)
@@ -177,7 +177,7 @@ while True:
     # logging.debug("found contours", t - time.time())
 
     # Preview thresholded image
-    img = cv2.cvtColor(img_grey, cv2.COLOR_GRAY2BGR)
+    cv2.cvtColor(img_grey, cv2.COLOR_GRAY2BGR)
 
     for x in range(0, len(contours)):
         contour = contours[x]
@@ -240,12 +240,10 @@ while True:
         np.savetxt("flattened_images.txt", npaFlattenedImages)
         break
     elif keypress in intValidChars:  # else if the char is in the list of chars we are looking for . . .
-        print(npaClassifications.shape,npaFlattenedImages.shape)
         # Add classifier
         new_classifier = np.array([[keypress]]).astype(np.float32)
         npaClassifications = np.append(npaClassifications, new_classifier, axis=0)  # append classification char to integer list of chars (we will convert to float later before writing to file)
         npaFlattenedImages = np.append(npaFlattenedImages, npaROIResized.astype(np.float32), 0)
-        print(npaClassifications.shape, npaFlattenedImages.shape)
         # Retrain
         kNearest = cv2.ml.KNearest_create()
         kNearest.train(npaFlattenedImages, cv2.ml.ROW_SAMPLE, npaClassifications)
