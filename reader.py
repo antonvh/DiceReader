@@ -20,15 +20,17 @@ max_H = 24
 max_S = 255
 max_V = 255
 thresh = 50
+v_crop_offset = 25
+h_crop_offset = 67
 
 # Other Image Recog settings
-MIN_CONTOUR_AREA = 300
-MAX_CONTOUR_AREA = 10000
+MIN_CONTOUR_AREA = 10000
+MAX_CONTOUR_AREA = 40000
 ROI_IMAGE_SIZE = 40
 
 
 # Create window & trackbars
-cv2.namedWindow("cam", cv2.WINDOW_OPENGL+cv2.WINDOW_AUTOSIZE)
+cv2.namedWindow("cam", cv2.WINDOW_OPENGL)
 cv2.createTrackbar('min_H', 'cam', 0, 255, nothing)
 cv2.createTrackbar('min_S', 'cam', 0, 255, nothing)
 cv2.createTrackbar('min_V', 'cam', 0, 255, nothing)
@@ -36,6 +38,8 @@ cv2.createTrackbar('max_H', 'cam', 0, 255, nothing)
 cv2.createTrackbar('max_S', 'cam', 0, 255, nothing)
 cv2.createTrackbar('max_V', 'cam', 0, 255, nothing)
 cv2.createTrackbar('thresh', 'cam', 0, 255, nothing)
+cv2.createTrackbar('h_crop_offset', 'cam', 0, 255, nothing)
+cv2.createTrackbar('v_crop_offset', 'cam', 0, 255, nothing)
 cv2.setTrackbarPos('min_H', 'cam', min_H)
 cv2.setTrackbarPos('min_S', 'cam', min_S)
 cv2.setTrackbarPos('min_V', 'cam', min_V)
@@ -43,6 +47,8 @@ cv2.setTrackbarPos('max_H', 'cam', max_H)
 cv2.setTrackbarPos('max_S', 'cam', max_S)
 cv2.setTrackbarPos('max_V', 'cam', max_V)
 cv2.setTrackbarPos('thresh', 'cam', thresh)
+cv2.setTrackbarPos('h_crop_offset', 'cam', h_crop_offset)
+cv2.setTrackbarPos('v_crop_offset', 'cam', v_crop_offset)
 
 # Start webcam
 cap = cv2.VideoCapture(0)
@@ -85,12 +91,13 @@ def rotate(image, angle, center=None, scale=1.0):
 
     return rotated
 
-def crop(img, target_w, target_h):
-    w, h = img.shape[:2]
-    y1 = max(0, w // 2 - target_w // 2)
-    y2 = min(w, w // 2 + target_w // 2)
-    x1 = max(0, h // 2 - target_h // 2)
-    x2 = min(h, h // 2 + target_h // 2)
+def crop(img, target_w, target_h, center=None):
+    h, w = img.shape[:2]
+    if center == None: center = (w // 2, h // 2)
+    x1 = max(0, center[0] - target_w // 2)
+    x2 = min(w, center[0] + target_w // 2)
+    y1 = max(0, center[1] - target_h // 2)
+    y2 = min(h, center[1] + target_h // 2)
     return np.array(img[y1:y2, x1:x2])
 
 def crop_minAreaRect(img, rect, extra_crop = 0):
@@ -129,7 +136,7 @@ while True:
     if not ok:
         continue    # and try again.
 
-    # img = crop(img, 400, 500)
+    # img = crop(img, 500, 500)
     height, width = img.shape[:2]
 
     # Filter yellow
@@ -182,27 +189,45 @@ while True:
             box = cv2.boxPoints(rotated_rect).astype(int)
             cv2.drawContours(img, [box], -1, (0, 255, 0))
 
+            # Fit a circle and draw it
+            circle = cv2.minEnclosingCircle(contour)  # (center, size, angle)
+            radius = int(circle[1])
+            center = tuple(np.array(circle[0], int))
+            offset_center_x = center[0] + int((center[0] - width / 2)/ width * h_crop_offset)
+            offset_center_y = center[1] + int((center[1] - height)/ height * v_crop_offset)
+            # print()
+            cv2.circle(img, center, radius, (0, 255, 0))
+            cv2.circle(img, (offset_center_x, offset_center_y), radius//2, (0, 255, 0))
+
             # Cut the minimum rectangle from the image
-            die = crop_minAreaRect(img_grey, rotated_rect, extra_crop = 20)
-            cv2.imshow("crop", die)
+            # die = crop_minAreaRect(img_grey, rotated_rect, extra_crop = 20)
+            die = crop(img_grey, radius-10, radius-10, center=(offset_center_x, offset_center_y))
+            try:
+                cv2.imshow("crop", die)
+            except:
+                print(radius, offset_center_x, offset_center_y)
+                raise
 
             # Resize the result to the size for recognition and find nearest.
             imgROIResized = cv2.resize(die, (ROI_IMAGE_SIZE, ROI_IMAGE_SIZE))
             npaROIResized = imgROIResized.reshape((1, ROI_IMAGE_SIZE ** 2))
             npaROIResized = np.float32(npaROIResized)  # convert from 1d numpy array of ints to 1d numpy array of floats
             retval, npaResults, neigh_resp, dists = kNearest.findNearest(npaROIResized, k=1)
-            code = str(int(npaResults[0][0]))
+            die_roll = int(npaResults[0][0])
 
             # Write the result in firebase
             result = firebase.get('/dice', None)
-            firebase.delete('/dice', list(result.keys())[0])
-            firebase.post('/dice', code)
+            if result:
+                keys = list(result.keys())
+                if keys is not None and len(keys) > 0:
+                    firebase.delete('/dice', keys[0])
+            firebase.post('/dice', {'d20': [die_roll], 'd6': [die_roll]})
 
             # Draw the result on screen
             cv2.putText(img,
-                            u"code: {0}".format(code),
-                            (int(rotated_rect[0][0]),int(rotated_rect[0][1])),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
+                            u"code: {0}".format(str(die_roll)),
+                        (int(rotated_rect[0][0]),int(rotated_rect[0][1])),
+                        cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 255), 2)
 
     # Show all calculations in the preview window
     cv2.imshow("cam", img)
@@ -212,7 +237,7 @@ while True:
                      ord('q'), ord('w'), ord('e'), ord('r'), ord('t'), ord('y'), ord('u'), ord('i'), ord('o'), ord('p')]
 
     # Wait for the 'q' key. Dont use ctrl-c !!!
-    keypress = cv2.waitKey(1000) & 0xFF
+    keypress = cv2.waitKey(1) & 0xFF
 
     # Read trackbar values
     min_H = cv2.getTrackbarPos('min_H', 'cam')
@@ -222,6 +247,8 @@ while True:
     max_S = cv2.getTrackbarPos('max_S', 'cam')
     max_V = cv2.getTrackbarPos('max_V', 'cam')
     thresh = cv2.getTrackbarPos('thresh', 'cam')
+    h_crop_offset = cv2.getTrackbarPos('h_crop_offset', 'cam')
+    v_crop_offset = cv2.getTrackbarPos('v_crop_offset', 'cam')
 
     if keypress == ord('x'):
         np.savetxt("classifications.txt", npaClassifications)
